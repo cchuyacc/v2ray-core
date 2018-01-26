@@ -32,7 +32,7 @@ func cidrToCondition(cidr []*CIDR, source bool) (Condition, error) {
 			}
 			ipv6Cond.Add(matcher)
 		default:
-			return nil, newError("invalid IP length").AtError()
+			return nil, newError("invalid IP length").AtWarning()
 		}
 	}
 
@@ -52,24 +52,11 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 	conds := NewConditionChan()
 
 	if len(rr.Domain) > 0 {
-		anyCond := NewAnyCondition()
+		matcher := NewCachableDomainMatcher()
 		for _, domain := range rr.Domain {
-			switch domain.Type {
-			case Domain_Plain:
-				anyCond.Add(NewPlainDomainMatcher(domain.Value))
-			case Domain_Regex:
-				matcher, err := NewRegexpDomainMatcher(domain.Value)
-				if err != nil {
-					return nil, err
-				}
-				anyCond.Add(matcher)
-			case Domain_Domain:
-				anyCond.Add(NewSubDomainMatcher(domain.Value))
-			default:
-				panic("Unknown domain type.")
-			}
+			matcher.Add(domain)
 		}
-		conds.Add(anyCond)
+		conds.Add(matcher)
 	}
 
 	if len(rr.Cidr) > 0 {
@@ -105,7 +92,7 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 	}
 
 	if conds.Len() == 0 {
-		return nil, newError("this rule has no effective fields").AtError()
+		return nil, newError("this rule has no effective fields").AtWarning()
 	}
 
 	return conds, nil

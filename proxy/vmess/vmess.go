@@ -5,13 +5,14 @@
 // clients with 'socks' for proxying.
 package vmess
 
-//go:generate go run $GOPATH/src/v2ray.com/core/tools/generrorgen/main.go -pkg vmess -path Proxy,VMess
+//go:generate go run $GOPATH/src/v2ray.com/core/common/errors/errorgen/main.go -pkg vmess -path Proxy,VMess
 
 import (
 	"context"
 	"sync"
 	"time"
 
+	"v2ray.com/core/common"
 	"v2ray.com/core/common/protocol"
 )
 
@@ -29,7 +30,6 @@ type idEntry struct {
 
 type TimedUserValidator struct {
 	sync.RWMutex
-	ctx        context.Context
 	validUsers []*protocol.User
 	userHash   map[[16]byte]indexTimePair
 	ids        []*idEntry
@@ -44,14 +44,13 @@ type indexTimePair struct {
 
 func NewTimedUserValidator(ctx context.Context, hasher protocol.IDHash) protocol.UserValidator {
 	tus := &TimedUserValidator{
-		ctx:        ctx,
 		validUsers: make([]*protocol.User, 0, 16),
 		userHash:   make(map[[16]byte]indexTimePair, 512),
 		ids:        make([]*idEntry, 0, 512),
 		hasher:     hasher,
 		baseTime:   protocol.Timestamp(time.Now().Unix() - cacheDurationSec*3),
 	}
-	go tus.updateUserHash(updateIntervalSec * time.Second)
+	go tus.updateUserHash(ctx, updateIntervalSec*time.Second)
 	return tus
 }
 
@@ -60,11 +59,11 @@ func (v *TimedUserValidator) generateNewHashes(nowSec protocol.Timestamp, idx in
 	var hashValueRemoval [16]byte
 	idHash := v.hasher(entry.id.Bytes())
 	for entry.lastSec <= nowSec {
-		idHash.Write(entry.lastSec.Bytes(nil))
+		common.Must2(idHash.Write(entry.lastSec.Bytes(nil)))
 		idHash.Sum(hashValue[:0])
 		idHash.Reset()
 
-		idHash.Write(entry.lastSecRemoval.Bytes(nil))
+		common.Must2(idHash.Write(entry.lastSecRemoval.Bytes(nil)))
 		idHash.Sum(hashValueRemoval[:0])
 		idHash.Reset()
 
@@ -79,7 +78,7 @@ func (v *TimedUserValidator) generateNewHashes(nowSec protocol.Timestamp, idx in
 	}
 }
 
-func (v *TimedUserValidator) updateUserHash(interval time.Duration) {
+func (v *TimedUserValidator) updateUserHash(ctx context.Context, interval time.Duration) {
 	for {
 		select {
 		case now := <-time.After(interval):
@@ -89,7 +88,7 @@ func (v *TimedUserValidator) updateUserHash(interval time.Duration) {
 				v.generateNewHashes(nowSec, entry.userIdx, entry)
 			}
 			v.Unlock()
-		case <-v.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}

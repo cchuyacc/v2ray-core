@@ -12,6 +12,7 @@ import (
 	"v2ray.com/core/app/log"
 	"v2ray.com/core/app/proxyman"
 	"v2ray.com/core/app/router"
+	clog "v2ray.com/core/common/log"
 	"v2ray.com/core/common/net"
 	"v2ray.com/core/common/protocol"
 	"v2ray.com/core/common/serial"
@@ -24,26 +25,26 @@ import (
 	"v2ray.com/core/proxy/vmess"
 	"v2ray.com/core/proxy/vmess/inbound"
 	"v2ray.com/core/proxy/vmess/outbound"
-	"v2ray.com/core/testing/assert"
 	"v2ray.com/core/testing/servers/tcp"
 	"v2ray.com/core/testing/servers/udp"
 	"v2ray.com/core/transport/internet"
+	. "v2ray.com/ext/assert"
 )
 
 func TestPassiveConnection(t *testing.T) {
-	assert := assert.On(t)
+	assert := With(t)
 
 	tcpServer := tcp.Server{
 		MsgProcessor: xor,
 		SendFirst:    []byte("send first"),
 	}
 	dest, err := tcpServer.Start()
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 	defer tcpServer.Close()
 
 	serverPort := pickPort()
 	serverConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(serverPort),
@@ -58,7 +59,7 @@ func TestPassiveConnection(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
 			},
@@ -66,55 +67,55 @@ func TestPassiveConnection(t *testing.T) {
 	}
 
 	servers, err := InitializeServerConfigs(serverConfig)
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{
 		IP:   []byte{127, 0, 0, 1},
 		Port: int(serverPort),
 	})
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	{
 		response := make([]byte, 1024)
 		nBytes, err := conn.Read(response)
-		assert.Error(err).IsNil()
-		assert.String(string(response[:nBytes])).Equals("send first")
+		assert(err, IsNil)
+		assert(string(response[:nBytes]), Equals, "send first")
 	}
 
 	payload := "dokodemo request."
 	{
 
 		nBytes, err := conn.Write([]byte(payload))
-		assert.Error(err).IsNil()
-		assert.Int(nBytes).Equals(len(payload))
+		assert(err, IsNil)
+		assert(nBytes, Equals, len(payload))
 	}
 
 	{
 		response := make([]byte, 1024)
 		nBytes, err := conn.Read(response)
-		assert.Error(err).IsNil()
-		assert.Bytes(response[:nBytes]).Equals(xor([]byte(payload)))
+		assert(err, IsNil)
+		assert(response[:nBytes], Equals, xor([]byte(payload)))
 	}
 
-	assert.Error(conn.Close()).IsNil()
+	assert(conn.Close(), IsNil)
 
 	CloseAllServers(servers)
 }
 
 func TestProxy(t *testing.T) {
-	assert := assert.On(t)
+	assert := With(t)
 
 	tcpServer := tcp.Server{
 		MsgProcessor: xor,
 	}
 	dest, err := tcpServer.Start()
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 	defer tcpServer.Close()
 
 	serverUserID := protocol.NewID(uuid.New())
 	serverPort := pickPort()
 	serverConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(serverPort),
@@ -131,7 +132,7 @@ func TestProxy(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
 			},
@@ -141,7 +142,7 @@ func TestProxy(t *testing.T) {
 	proxyUserID := protocol.NewID(uuid.New())
 	proxyPort := pickPort()
 	proxyConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(proxyPort),
@@ -158,7 +159,7 @@ func TestProxy(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
 			},
@@ -167,7 +168,7 @@ func TestProxy(t *testing.T) {
 
 	clientPort := pickPort()
 	clientConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(clientPort),
@@ -182,7 +183,7 @@ func TestProxy(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&outbound.Config{
 					Receiver: []*protocol.ServerEndpoint{
@@ -227,42 +228,42 @@ func TestProxy(t *testing.T) {
 	}
 
 	servers, err := InitializeServerConfigs(serverConfig, proxyConfig, clientConfig)
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{
 		IP:   []byte{127, 0, 0, 1},
 		Port: int(clientPort),
 	})
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	payload := "dokodemo request."
 	nBytes, err := conn.Write([]byte(payload))
-	assert.Error(err).IsNil()
-	assert.Int(nBytes).Equals(len(payload))
+	assert(err, IsNil)
+	assert(nBytes, Equals, len(payload))
 
 	response := make([]byte, 1024)
 	nBytes, err = conn.Read(response)
-	assert.Error(err).IsNil()
-	assert.Bytes(response[:nBytes]).Equals(xor([]byte(payload)))
-	assert.Error(conn.Close()).IsNil()
+	assert(err, IsNil)
+	assert(response[:nBytes], Equals, xor([]byte(payload)))
+	assert(conn.Close(), IsNil)
 
 	CloseAllServers(servers)
 }
 
 func TestProxyOverKCP(t *testing.T) {
-	assert := assert.On(t)
+	assert := With(t)
 
 	tcpServer := tcp.Server{
 		MsgProcessor: xor,
 	}
 	dest, err := tcpServer.Start()
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 	defer tcpServer.Close()
 
 	serverUserID := protocol.NewID(uuid.New())
 	serverPort := pickPort()
 	serverConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(serverPort),
@@ -282,7 +283,7 @@ func TestProxyOverKCP(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
 			},
@@ -292,7 +293,7 @@ func TestProxyOverKCP(t *testing.T) {
 	proxyUserID := protocol.NewID(uuid.New())
 	proxyPort := pickPort()
 	proxyConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(proxyPort),
@@ -309,7 +310,7 @@ func TestProxyOverKCP(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
 				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
@@ -323,7 +324,7 @@ func TestProxyOverKCP(t *testing.T) {
 
 	clientPort := pickPort()
 	clientConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(clientPort),
@@ -338,7 +339,7 @@ func TestProxyOverKCP(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&outbound.Config{
 					Receiver: []*protocol.ServerEndpoint{
@@ -386,49 +387,49 @@ func TestProxyOverKCP(t *testing.T) {
 	}
 
 	servers, err := InitializeServerConfigs(serverConfig, proxyConfig, clientConfig)
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{
 		IP:   []byte{127, 0, 0, 1},
 		Port: int(clientPort),
 	})
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	payload := "dokodemo request."
 	nBytes, err := conn.Write([]byte(payload))
-	assert.Error(err).IsNil()
-	assert.Int(nBytes).Equals(len(payload))
+	assert(err, IsNil)
+	assert(nBytes, Equals, len(payload))
 
 	response := make([]byte, 1024)
 	nBytes, err = conn.Read(response)
-	assert.Error(err).IsNil()
-	assert.Bytes(response[:nBytes]).Equals(xor([]byte(payload)))
-	assert.Error(conn.Close()).IsNil()
+	assert(err, IsNil)
+	assert(response[:nBytes], Equals, xor([]byte(payload)))
+	assert(conn.Close(), IsNil)
 
 	CloseAllServers(servers)
 }
 
 func TestBlackhole(t *testing.T) {
-	assert := assert.On(t)
+	assert := With(t)
 
 	tcpServer := tcp.Server{
 		MsgProcessor: xor,
 	}
 	dest, err := tcpServer.Start()
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 	defer tcpServer.Close()
 
 	tcpServer2 := tcp.Server{
 		MsgProcessor: xor,
 	}
 	dest2, err := tcpServer2.Start()
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 	defer tcpServer2.Close()
 
 	serverPort := pickPort()
 	serverPort2 := pickPort()
 	serverConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(serverPort),
@@ -456,7 +457,7 @@ func TestBlackhole(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				Tag:           "direct",
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
@@ -479,46 +480,46 @@ func TestBlackhole(t *testing.T) {
 	}
 
 	servers, err := InitializeServerConfigs(serverConfig)
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{
 		IP:   []byte{127, 0, 0, 1},
 		Port: int(serverPort2),
 	})
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	payload := "dokodemo request."
 	{
 
 		nBytes, err := conn.Write([]byte(payload))
-		assert.Error(err).IsNil()
-		assert.Int(nBytes).Equals(len(payload))
+		assert(err, IsNil)
+		assert(nBytes, Equals, len(payload))
 	}
 
 	{
 		response := make([]byte, 1024)
 		_, err := conn.Read(response)
-		assert.Error(err).IsNotNil()
+		assert(err, IsNotNil)
 	}
 
-	assert.Error(conn.Close()).IsNil()
+	assert(conn.Close(), IsNil)
 
 	CloseAllServers(servers)
 }
 
 func TestForward(t *testing.T) {
-	assert := assert.On(t)
+	assert := With(t)
 
 	tcpServer := tcp.Server{
 		MsgProcessor: xor,
 	}
 	dest, err := tcpServer.Start()
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 	defer tcpServer.Close()
 
 	serverPort := pickPort()
 	serverConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(serverPort),
@@ -534,7 +535,7 @@ func TestForward(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{
 					DestinationOverride: &freedom.DestinationOverride{
@@ -549,42 +550,42 @@ func TestForward(t *testing.T) {
 	}
 
 	servers, err := InitializeServerConfigs(serverConfig)
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	{
 		noAuthDialer, err := xproxy.SOCKS5("tcp", net.TCPDestination(net.LocalHostIP, serverPort).NetAddr(), nil, xproxy.Direct)
-		assert.Error(err).IsNil()
+		assert(err, IsNil)
 		conn, err := noAuthDialer.Dial("tcp", "google.com:80")
-		assert.Error(err).IsNil()
+		assert(err, IsNil)
 
 		payload := "test payload"
 		nBytes, err := conn.Write([]byte(payload))
-		assert.Error(err).IsNil()
-		assert.Int(nBytes).Equals(len(payload))
+		assert(err, IsNil)
+		assert(nBytes, Equals, len(payload))
 
 		response := make([]byte, 1024)
 		nBytes, err = conn.Read(response)
-		assert.Error(err).IsNil()
-		assert.Bytes(response[:nBytes]).Equals(xor([]byte(payload)))
-		assert.Error(conn.Close()).IsNil()
+		assert(err, IsNil)
+		assert(response[:nBytes], Equals, xor([]byte(payload)))
+		assert(conn.Close(), IsNil)
 	}
 
 	CloseAllServers(servers)
 }
 
 func TestUDPConnection(t *testing.T) {
-	assert := assert.On(t)
+	assert := With(t)
 
 	udpServer := udp.Server{
 		MsgProcessor: xor,
 	}
 	dest, err := udpServer.Start()
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 	defer udpServer.Close()
 
 	clientPort := pickPort()
 	clientConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
 					PortRange: net.SinglePortRange(clientPort),
@@ -599,7 +600,7 @@ func TestUDPConnection(t *testing.T) {
 				}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
 			},
@@ -607,28 +608,28 @@ func TestUDPConnection(t *testing.T) {
 	}
 
 	servers, err := InitializeServerConfigs(clientConfig)
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	{
 		conn, err := net.DialUDP("udp", nil, &net.UDPAddr{
 			IP:   []byte{127, 0, 0, 1},
 			Port: int(clientPort),
 		})
-		assert.Error(err).IsNil()
+		assert(err, IsNil)
 
 		payload := "dokodemo request."
 		for i := 0; i < 5; i++ {
 			nBytes, err := conn.Write([]byte(payload))
-			assert.Error(err).IsNil()
-			assert.Int(nBytes).Equals(len(payload))
+			assert(err, IsNil)
+			assert(nBytes, Equals, len(payload))
 
 			response := make([]byte, 1024)
 			nBytes, err = conn.Read(response)
-			assert.Error(err).IsNil()
-			assert.Bytes(response[:nBytes]).Equals(xor([]byte(payload)))
+			assert(err, IsNil)
+			assert(response[:nBytes], Equals, xor([]byte(payload)))
 		}
 
-		assert.Error(conn.Close()).IsNil()
+		assert(conn.Close(), IsNil)
 	}
 
 	time.Sleep(20 * time.Second)
@@ -638,30 +639,30 @@ func TestUDPConnection(t *testing.T) {
 			IP:   []byte{127, 0, 0, 1},
 			Port: int(clientPort),
 		})
-		assert.Error(err).IsNil()
+		assert(err, IsNil)
 
 		payload := "dokodemo request."
 		nBytes, err := conn.Write([]byte(payload))
-		assert.Error(err).IsNil()
-		assert.Int(nBytes).Equals(len(payload))
+		assert(err, IsNil)
+		assert(nBytes, Equals, len(payload))
 
 		response := make([]byte, 1024)
 		nBytes, err = conn.Read(response)
-		assert.Error(err).IsNil()
-		assert.Bytes(response[:nBytes]).Equals(xor([]byte(payload)))
-		assert.Error(conn.Close()).IsNil()
+		assert(err, IsNil)
+		assert(response[:nBytes], Equals, xor([]byte(payload)))
+		assert(conn.Close(), IsNil)
 	}
 
 	CloseAllServers(servers)
 }
 
 func TestDomainSniffing(t *testing.T) {
-	assert := assert.On(t)
+	assert := With(t)
 
 	sniffingPort := pickPort()
 	httpPort := pickPort()
 	serverConfig := &core.Config{
-		Inbound: []*proxyman.InboundHandlerConfig{
+		Inbound: []*core.InboundHandlerConfig{
 			{
 				Tag: "snif",
 				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
@@ -688,7 +689,7 @@ func TestDomainSniffing(t *testing.T) {
 				ProxySettings: serial.ToTypedMessage(&v2http.ServerConfig{}),
 			},
 		},
-		Outbound: []*proxyman.OutboundHandlerConfig{
+		Outbound: []*core.OutboundHandlerConfig{
 			{
 				Tag: "redir",
 				ProxySettings: serial.ToTypedMessage(&freedom.Config{
@@ -718,14 +719,14 @@ func TestDomainSniffing(t *testing.T) {
 				},
 			}),
 			serial.ToTypedMessage(&log.Config{
-				ErrorLogLevel: log.LogLevel_Debug,
+				ErrorLogLevel: clog.Severity_Debug,
 				ErrorLogType:  log.LogType_Console,
 			}),
 		},
 	}
 
 	servers, err := InitializeServerConfigs(serverConfig)
-	assert.Error(err).IsNil()
+	assert(err, IsNil)
 
 	{
 		transport := &http.Transport{
@@ -739,10 +740,10 @@ func TestDomainSniffing(t *testing.T) {
 		}
 
 		resp, err := client.Get("https://www.github.com/")
-		assert.Error(err).IsNil()
-		assert.Int(resp.StatusCode).Equals(200)
+		assert(err, IsNil)
+		assert(resp.StatusCode, Equals, 200)
 
-		assert.Error(resp.Write(ioutil.Discard)).IsNil()
+		assert(resp.Write(ioutil.Discard), IsNil)
 	}
 
 	CloseAllServers(servers)

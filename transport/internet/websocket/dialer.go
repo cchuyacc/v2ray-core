@@ -2,9 +2,9 @@ package websocket
 
 import (
 	"context"
+	"time"
 
 	"github.com/gorilla/websocket"
-	"v2ray.com/core/app/log"
 	"v2ray.com/core/common"
 	"v2ray.com/core/common/net"
 	"v2ray.com/core/transport/internet"
@@ -13,11 +13,11 @@ import (
 
 // Dial dials a WebSocket connection to the given destination.
 func Dial(ctx context.Context, dest net.Destination) (internet.Connection, error) {
-	log.Trace(newError("creating connection to ", dest))
+	newError("creating connection to ", dest).WriteToLog()
 
 	conn, err := dialWebsocket(ctx, dest)
 	if err != nil {
-		return nil, newError("failed to dial WebSocket")
+		return nil, newError("failed to dial WebSocket").Base(err)
 	}
 	return internet.Connection(conn), nil
 }
@@ -30,27 +30,20 @@ func dialWebsocket(ctx context.Context, dest net.Destination) (net.Conn, error) 
 	src := internet.DialerSourceFromContext(ctx)
 	wsSettings := internet.TransportSettingsFromContext(ctx).(*Config)
 
-	commonDial := func(network, addr string) (net.Conn, error) {
-		return internet.DialSystem(ctx, src, dest)
-	}
-
-	dialer := websocket.Dialer{
-		NetDial:         commonDial,
-		ReadBufferSize:  32 * 1024,
-		WriteBufferSize: 32 * 1024,
+	dialer := &websocket.Dialer{
+		NetDial: func(network, addr string) (net.Conn, error) {
+			return internet.DialSystem(ctx, src, dest)
+		},
+		ReadBufferSize:   4 * 1024,
+		WriteBufferSize:  4 * 1024,
+		HandshakeTimeout: time.Second * 8,
 	}
 
 	protocol := "ws"
 
-	if securitySettings := internet.SecuritySettingsFromContext(ctx); securitySettings != nil {
-		tlsConfig, ok := securitySettings.(*tls.Config)
-		if ok {
-			protocol = "wss"
-			dialer.TLSClientConfig = tlsConfig.GetTLSConfig()
-			if dest.Address.Family().IsDomain() {
-				dialer.TLSClientConfig.ServerName = dest.Address.Domain()
-			}
-		}
+	if config := tls.ConfigFromContext(ctx, tls.WithDestination(dest)); config != nil {
+		protocol = "wss"
+		dialer.TLSClientConfig = config.GetTLSConfig()
 	}
 
 	host := dest.NetAddr()
@@ -59,7 +52,7 @@ func dialWebsocket(ctx context.Context, dest net.Destination) (net.Conn, error) 
 	}
 	uri := protocol + "://" + host + wsSettings.GetNormailzedPath()
 
-	conn, resp, err := dialer.Dial(uri, nil)
+	conn, resp, err := dialer.Dial(uri, wsSettings.GetRequestHeader())
 	if err != nil {
 		var reason string
 		if resp != nil {
@@ -68,7 +61,5 @@ func dialWebsocket(ctx context.Context, dest net.Destination) (net.Conn, error) 
 		return nil, newError("failed to dial to (", uri, "): ", reason).Base(err)
 	}
 
-	return &connection{
-		wsc: conn,
-	}, nil
+	return newConnection(conn, conn.RemoteAddr()), nil
 }

@@ -3,7 +3,6 @@ package inbound
 import (
 	"context"
 
-	"v2ray.com/core/app/log"
 	"v2ray.com/core/app/proxyman"
 	"v2ray.com/core/app/proxyman/mux"
 	"v2ray.com/core/common/dice"
@@ -15,6 +14,7 @@ type AlwaysOnInboundHandler struct {
 	proxy   proxy.Inbound
 	workers []worker
 	mux     *mux.Server
+	tag     string
 }
 
 func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *proxyman.ReceiverConfig, proxyConfig interface{}) (*AlwaysOnInboundHandler, error) {
@@ -26,6 +26,7 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 	h := &AlwaysOnInboundHandler{
 		proxy: p,
 		mux:   mux.NewServer(ctx),
+		tag:   tag,
 	}
 
 	nl := p.Network()
@@ -36,7 +37,7 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 	}
 	for port := pr.From; port <= pr.To; port++ {
 		if nl.HasNetwork(net.Network_TCP) {
-			log.Trace(newError("creating tcp worker on ", address, ":", port).AtDebug())
+			newError("creating stream worker on ", address, ":", port).AtDebug().WriteToLog()
 			worker := &tcpWorker{
 				address:      address,
 				port:         net.Port(port),
@@ -81,10 +82,14 @@ func (h *AlwaysOnInboundHandler) Close() {
 	}
 }
 
-func (h *AlwaysOnInboundHandler) GetRandomInboundProxy() (proxy.Inbound, net.Port, int) {
+func (h *AlwaysOnInboundHandler) GetRandomInboundProxy() (interface{}, net.Port, int) {
 	if len(h.workers) == 0 {
 		return nil, 0, 0
 	}
 	w := h.workers[dice.Roll(len(h.workers))]
 	return w.Proxy(), w.Port(), 9999
+}
+
+func (h *AlwaysOnInboundHandler) Tag() string {
+	return h.tag
 }

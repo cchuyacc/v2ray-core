@@ -1,21 +1,23 @@
 package tls
 
 import (
+	"context"
 	"crypto/tls"
 
-	"v2ray.com/core/app/log"
+	"v2ray.com/core/common/net"
+	"v2ray.com/core/transport/internet"
 )
 
 var (
 	globalSessionCache = tls.NewLRUClientSessionCache(128)
 )
 
-func (v *Config) BuildCertificates() []tls.Certificate {
-	certs := make([]tls.Certificate, 0, len(v.Certificate))
-	for _, entry := range v.Certificate {
+func (c *Config) BuildCertificates() []tls.Certificate {
+	certs := make([]tls.Certificate, 0, len(c.Certificate))
+	for _, entry := range c.Certificate {
 		keyPair, err := tls.X509KeyPair(entry.Certificate, entry.Key)
 		if err != nil {
-			log.Trace(newError("ignoring invalid X509 key pair").Base(err).AtWarning())
+			newError("ignoring invalid X509 key pair").Base(err).AtWarning().WriteToLog()
 			continue
 		}
 		certs = append(certs, keyPair)
@@ -23,21 +25,56 @@ func (v *Config) BuildCertificates() []tls.Certificate {
 	return certs
 }
 
-func (v *Config) GetTLSConfig() *tls.Config {
+func (c *Config) GetTLSConfig() *tls.Config {
 	config := &tls.Config{
 		ClientSessionCache: globalSessionCache,
 		NextProtos:         []string{"http/1.1"},
 	}
-	if v == nil {
+	if c == nil {
 		return config
 	}
 
-	config.InsecureSkipVerify = v.AllowInsecure
-	config.Certificates = v.BuildCertificates()
+	config.InsecureSkipVerify = c.AllowInsecure
+	config.Certificates = c.BuildCertificates()
 	config.BuildNameToCertificate()
-	if len(v.ServerName) > 0 {
-		config.ServerName = v.ServerName
+	if len(c.ServerName) > 0 {
+		config.ServerName = c.ServerName
+	}
+	if len(c.NextProtocol) > 0 {
+		config.NextProtos = c.NextProtocol
 	}
 
 	return config
+}
+
+type Option func(*Config)
+
+func WithDestination(dest net.Destination) Option {
+	return func(config *Config) {
+		if dest.Address.Family().IsDomain() && len(config.ServerName) == 0 {
+			config.ServerName = dest.Address.Domain()
+		}
+	}
+}
+
+func WithNextProto(protocol ...string) Option {
+	return func(config *Config) {
+		if len(config.NextProtocol) == 0 {
+			config.NextProtocol = protocol
+		}
+	}
+}
+
+func ConfigFromContext(ctx context.Context, opts ...Option) *Config {
+	securitySettings := internet.SecuritySettingsFromContext(ctx)
+	if securitySettings == nil {
+		return nil
+	}
+	if config, ok := securitySettings.(*Config); ok {
+		for _, opt := range opts {
+			opt(config)
+		}
+		return config
+	}
+	return nil
 }

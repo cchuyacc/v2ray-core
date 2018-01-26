@@ -2,10 +2,11 @@ package core
 
 import (
 	"io"
-	"io/ioutil"
+
+	"v2ray.com/core/common"
+	"v2ray.com/core/common/buf"
 
 	"github.com/golang/protobuf/proto"
-	"v2ray.com/core/common"
 )
 
 // ConfigLoader is an utility to load V2Ray config from external source.
@@ -23,14 +24,17 @@ func RegisterConfigLoader(format ConfigFormat, loader ConfigLoader) error {
 func LoadConfig(format ConfigFormat, input io.Reader) (*Config, error) {
 	loader, found := configLoaderCache[format]
 	if !found {
-		return nil, newError(ConfigFormat_name[int32(format)], " is not loadable.")
+		return nil, newError(ConfigFormat_name[int32(format)], " is not loadable.").AtWarning()
 	}
 	return loader(input)
 }
 
 func loadProtobufConfig(input io.Reader) (*Config, error) {
 	config := new(Config)
-	data, _ := ioutil.ReadAll(input)
+	data, err := buf.ReadAllToBytes(input)
+	if err != nil {
+		return nil, err
+	}
 	if err := proto.Unmarshal(data, config); err != nil {
 		return nil, err
 	}

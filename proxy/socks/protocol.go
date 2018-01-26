@@ -3,6 +3,7 @@ package socks
 import (
 	"io"
 
+	"v2ray.com/core/common"
 	"v2ray.com/core/common/buf"
 	"v2ray.com/core/common/net"
 	"v2ray.com/core/common/protocol"
@@ -244,25 +245,32 @@ func writeSocks5AuthenticationResponse(writer io.Writer, version byte, auth byte
 	return err
 }
 
-func appendAddress(buffer *buf.Buffer, address net.Address, port net.Port) {
+// AppendAddress appends Socks address into the given buffer.
+func AppendAddress(buffer *buf.Buffer, address net.Address, port net.Port) error {
 	switch address.Family() {
 	case net.AddressFamilyIPv4:
-		buffer.AppendBytes(0x01)
+		buffer.AppendBytes(addrTypeIPv4)
 		buffer.Append(address.IP())
 	case net.AddressFamilyIPv6:
-		buffer.AppendBytes(0x04)
+		buffer.AppendBytes(addrTypeIPv6)
 		buffer.Append(address.IP())
 	case net.AddressFamilyDomain:
-		buffer.AppendBytes(0x03, byte(len(address.Domain())))
-		buffer.AppendSupplier(serial.WriteString(address.Domain()))
+		if protocol.IsDomainTooLong(address.Domain()) {
+			return newError("Super long domain is not supported in Socks protocol: ", address.Domain())
+		}
+		buffer.AppendBytes(addrTypeDomain, byte(len(address.Domain())))
+		common.Must(buffer.AppendSupplier(serial.WriteString(address.Domain())))
 	}
-	buffer.AppendSupplier(serial.WriteUint16(port.Value()))
+	common.Must(buffer.AppendSupplier(serial.WriteUint16(port.Value())))
+	return nil
 }
 
 func writeSocks5Response(writer io.Writer, errCode byte, address net.Address, port net.Port) error {
 	buffer := buf.NewLocal(64)
 	buffer.AppendBytes(socks5Version, errCode, 0x00 /* reserved */)
-	appendAddress(buffer, address, port)
+	if err := AppendAddress(buffer, address, port); err != nil {
+		return err
+	}
 
 	_, err := writer.Write(buffer.Bytes())
 	return err
@@ -327,12 +335,14 @@ func DecodeUDPPacket(packet []byte) (*protocol.RequestHeader, []byte, error) {
 	return request, packet[dataBegin:], nil
 }
 
-func EncodeUDPPacket(request *protocol.RequestHeader, data []byte) *buf.Buffer {
+func EncodeUDPPacket(request *protocol.RequestHeader, data []byte) (*buf.Buffer, error) {
 	b := buf.New()
 	b.AppendBytes(0, 0, 0 /* Fragment */)
-	appendAddress(b, request.Address, request.Port)
+	if err := AppendAddress(b, request.Address, request.Port); err != nil {
+		return nil, err
+	}
 	b.Append(data)
-	return b
+	return b, nil
 }
 
 type UDPReader struct {
@@ -343,7 +353,7 @@ func NewUDPReader(reader io.Reader) *UDPReader {
 	return &UDPReader{reader: reader}
 }
 
-func (r *UDPReader) Read() (buf.MultiBuffer, error) {
+func (r *UDPReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
 	b := buf.New()
 	if err := b.AppendSupplier(buf.ReadFrom(r.reader)); err != nil {
 		return nil, err
@@ -371,7 +381,10 @@ func NewUDPWriter(request *protocol.RequestHeader, writer io.Writer) *UDPWriter 
 
 // Write implements io.Writer.
 func (w *UDPWriter) Write(b []byte) (int, error) {
-	eb := EncodeUDPPacket(w.request, b)
+	eb, err := EncodeUDPPacket(w.request, b)
+	if err != nil {
+		return 0, err
+	}
 	defer eb.Release()
 	if _, err := w.writer.Write(eb.Bytes()); err != nil {
 		return 0, err
@@ -384,13 +397,27 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 	if request.User != nil {
 		authByte = byte(authPassword)
 	}
-	authRequest := []byte{socks5Version, 0x01, authByte}
-	if _, err := writer.Write(authRequest); err != nil {
+
+	b := buf.NewLocal(512)
+	b.AppendBytes(socks5Version, 0x01, authByte)
+	if authByte == authPassword {
+		rawAccount, err := request.User.GetTypedAccount()
+		if err != nil {
+			return nil, err
+		}
+		account := rawAccount.(*Account)
+
+		b.AppendBytes(0x01, byte(len(account.Username)))
+		b.Append([]byte(account.Username))
+		b.AppendBytes(byte(len(account.Password)))
+		b.Append([]byte(account.Password))
+	}
+
+	if _, err := writer.Write(b.Bytes()); err != nil {
 		return nil, err
 	}
 
-	b := buf.NewLocal(512)
-	if err := b.AppendSupplier(buf.ReadFullFrom(reader, 2)); err != nil {
+	if err := b.Reset(buf.ReadFullFrom(reader, 2)); err != nil {
 		return nil, err
 	}
 
@@ -402,22 +429,7 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 	}
 
 	if authByte == authPassword {
-		rawAccount, err := request.User.GetTypedAccount()
-		if err != nil {
-			return nil, err
-		}
-		account := rawAccount.(*Account)
-
-		b.Clear()
-		b.AppendBytes(socks5Version, byte(len(account.Username)))
-		b.Append([]byte(account.Username))
-		b.AppendBytes(byte(len(account.Password)))
-		b.Append([]byte(account.Password))
-		if _, err := writer.Write(b.Bytes()); err != nil {
-			return nil, err
-		}
-		b.Clear()
-		if err := b.AppendSupplier(buf.ReadFullFrom(reader, 2)); err != nil {
+		if err := b.Reset(buf.ReadFullFrom(reader, 2)); err != nil {
 			return nil, err
 		}
 		if b.Byte(1) != 0x00 {
@@ -432,7 +444,7 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 		command = byte(cmdUDPPort)
 	}
 	b.AppendBytes(socks5Version, command, 0x00 /* reserved */)
-	appendAddress(b, request.Address, request.Port)
+	AppendAddress(b, request.Address, request.Port)
 	if _, err := writer.Write(b.Bytes()); err != nil {
 		return nil, err
 	}
